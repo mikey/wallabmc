@@ -27,8 +27,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: zephyrprojectrtos/ci:v0.29.0
-      volumes:
-        - /:/host_root
 
     strategy:
       matrix:
@@ -40,18 +38,6 @@ jobs:
       BOARD: ${{ matrix.board }}
 
     steps:
-      - name: Free Disk Space
-        run: |
-          rm -rf /host_root/usr/share/dotnet || true
-          rm -rf /host_root/usr/local/lib/android || true
-          rm -rf /host_root/opt/ghc || true
-          rm -rf /host_root/usr/share/swift || true
-          rm -rf /host_root/usr/local/.ghcup || true
-          rm -rf /host_root/usr/local/share/powershell || true
-          rm -rf /host_root/usr/local/share/chromium || true
-          rm -rf /host_root/usr/local/lib/node_modules || true
-          df -h /host_root
-
       - name: Checkout
         uses: actions/checkout@v6
         with:
