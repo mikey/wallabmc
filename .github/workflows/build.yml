@@ -30,7 +30,15 @@ jobs:
 
     strategy:
       matrix:
-        board: [nucleo_f767zi, hifive_premier_p550_mcu, qemu_cortex_m3]
+        include:
+          - board: nucleo_f767zi
+            name: nucleo_f767zi
+          - board: hifive_premier_p550_mcu
+            name: hifive_premier_p550_mcu
+          - board: qemu_cortex_m3
+            name: qemu_cortex_m3
+          - board: esp32c6_devkitc/esp32c6/hpcore
+            name: esp32c6_devkitc
 
     env:
       CMAKE_PREFIX_PATH: /opt/toolchains
@@ -103,7 +111,7 @@ jobs:
         if: ${{ matrix.board != 'qemu_cortex_m3' }}
         uses: actions/upload-artifact@v6
         with:
-          name: wallabmc-firmware-${{ matrix.board }}
+          name: wallabmc-firmware-${{ matrix.name }}
           path: |
             workspace/build/mcuboot.hex
             workspace/build/mcuboot.bin
@@ -118,7 +126,7 @@ jobs:
         if: ${{ matrix.board == 'qemu_cortex_m3' }}
         uses: actions/upload-artifact@v6
         with:
-          name: wallabmc-firmware-${{ matrix.board }}
+          name: wallabmc-firmware-${{ matrix.name }}
           path: |
             workspace/build/zephyr/zephyr.bin
             workspace/build/zephyr/zephyr.elf
