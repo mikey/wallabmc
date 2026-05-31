@@ -355,6 +355,14 @@ config PERSISTENT_STORAGE
 	select NVS
 	select NVS_INIT_BAD_MEMORY_REGION # Do not require erased flash
 
+config APP_WIFI
+	bool "Connect to Wi-Fi at boot using compile-time credentials"
+	default y if WIFI
+	depends on WIFI
+	select WIFI_CREDENTIALS
+	select WIFI_CREDENTIALS_STATIC
+	select NET_L2_WIFI_MGMT
+
 config REBOOT
 	bool
 	default y

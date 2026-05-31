@@ -16,6 +16,7 @@ LOG_MODULE_REGISTER(wallabmc, LOG_LEVEL_INF);
 #include "config.h"
 #include "button.h"
 #include "net.h"
+#include "wifi.h"
 #include "http.h"
 #include "power.h"
 #include "rtc.h"
@@ -222,6 +223,12 @@ int main(void)
 	if (button_init() < 0) {
 		LOG_ERR("Button init failed");
 		/* Continue */
+	}
+
+	LOG_DBG("Wi-Fi connect init");
+	if (wifi_connect_init() < 0) {
+		LOG_ERR("Wi-Fi connect init failed");
+		/* Continue; the iface may still come up via shell or stored creds. */
 	}
 
 	LOG_DBG("Network init");
