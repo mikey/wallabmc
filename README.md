@@ -28,6 +28,7 @@ WallaBMC currently supports the following hardware platforms:
 | **SiFive HiFive Premier P550 MCU** | hifive_premier_p550_mcu | RISC-V based platform |
 | **STM32 Nucleo F767ZI** | nucleo_f767zi | ARM Cortex-M7 development board (standalone, no host CPU) |
 | **Espressif ESP32-C6 DevKitC** | esp32c6_devkitc/esp32c6/hpcore | RISC-V, Wi-Fi 6, wired to a SpacemiT K3 SoM260 host (see [below](#esp32-c6-devkitc--spacemit-k3-som260)) |
+| **Seeed Studio XIAO ESP32-C6** | xiao_esp32c6/esp32c6/hpcore | Same SoC as above on a 21×17.5 mm board with USB-C; BMC console over USB Serial/JTAG (see [below](#seeed-xiao-esp32-c6)) |
 | **qemu** | qemu_cortex_m3 | see [run_qemu_ci.py](scripts/run_qemu_ci.py) |
 
 ### Screenshot
@@ -97,6 +98,58 @@ power on          # 200 ms press on GPIO6 (if BMC believes host is off)
 power off         # 200 ms press on GPIO6 (if BMC believes host is on)
 power force-off   # 6 s press on GPIO6
 reset             # 1 s press on GPIO7
+```
+
+### Seeed XIAO ESP32-C6
+
+Same SoC as the DevKitC port above, on Seeed Studio's 21×17.5 mm XIAO
+form factor with a USB-C connector. The BMC console runs over the SoC's
+built-in USB Serial/JTAG (the XIAO's USB-C port), which frees UART0 for
+the host serial bridge. Only four GPIOs on the XIAO connector are
+needed for host control; the rest of the pads are free for other uses.
+
+#### Wiring
+
+Five wires between the XIAO ESP32-C6 and the host board:
+
+| XIAO pin | GPIO | Direction | Host signal | Notes |
+| --- | --- | --- | --- | --- |
+| D6 | GPIO16 | out | host UART RX | UART0 TX — host serial console (115200 8N1) |
+| D7 | GPIO17 | in | host UART TX | UART0 RX — host serial console |
+| D1 | GPIO1 | out (open-drain) | PWRBTN# input | Active-low momentary press |
+| D2 | GPIO2 | out (open-drain) | SYSRESET# input | Active-low momentary press |
+| GND | — | — | GND | Common reference, required |
+
+The same voltage caveats from the DevKitC port apply: ESP32-C6 GPIOs are
+not 5 V tolerant, so use a level-shifting MOSFET on PWRBTN# / SYSRESET#
+if the host pulls those lines above 3.3 V un-asserted, and level-shift
+the host's UART TX into D7 (GPIO17) if it runs above 3.3 V.
+
+#### Build and flash
+
+Same Espressif Simple Boot / no-sysbuild flow as the DevKitC. Plug the
+XIAO into your build host over USB-C — the same USB cable provides
+power, flashes the firmware, and carries the BMC console:
+
+```
+# One-time: fetch the Espressif Wi-Fi/PHY binary blobs.
+west blobs fetch hal_espressif
+
+cd zephyr
+west build -b xiao_esp32c6/esp32c6/hpcore ../wallabmc --pristine \
+    -- -DCONFIG_WIFI_CREDENTIALS_STATIC_SSID='"your-ssid"' \
+       -DCONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD='"your-password"' \
+       -DCONFIG_DEFAULT_ADMIN_PASSWORD='"admin"'
+west flash
+```
+
+Host control from the shell is the same as the DevKitC port:
+
+```
+power on          # 200 ms press on GPIO1 (if BMC believes host is off)
+power off         # 200 ms press on GPIO1 (if BMC believes host is on)
+power force-off   # 6 s press on GPIO1
+reset             # 1 s press on GPIO2
 ```
 
 ## Using
