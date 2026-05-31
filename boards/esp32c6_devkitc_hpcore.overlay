@@ -2,14 +2,45 @@
  * SPDX-FileCopyrightText: © 2025-2026 Tenstorrent USA, Inc.
  * SPDX-License-Identifier: Apache-2.0
  *
- * ESP32-C6 DevKitC initial port: only the reset-button alias is wired up.
- * No host CPU on this board, so no power/reset/host-console GPIOs yet.
+ * ESP32-C6 DevKitC port.
+ *
+ * UART0 (GPIO16/17) is the BMC console (already configured by the board DTS).
+ * UART1 is wired up here for the host serial bridge:
+ *   J1 pin 4 = GPIO4 = TX (out to host RX)
+ *   J1 pin 5 = GPIO5 = RX (in from host TX)
+ *   Common GND with the host board.
+ *
  * /jtag node omitted -> CONFIG_JTAG auto-disabled via dt_path_enabled().
  * status-led alias omitted -> power.c falls back to a no-op status_led_init().
  */
 
+#include <zephyr/dt-bindings/pinctrl/esp-pinctrl-common.h>
+#include <zephyr/dt-bindings/pinctrl/esp32c6-pinctrl.h>
+#include <zephyr/dt-bindings/pinctrl/esp32c6-gpio-sigmap.h>
+
 / {
 	aliases {
 		reset-button = &user_button1;
+		host-console-uart = &uart1;
 	};
+};
+
+&pinctrl {
+	uart1_default: uart1_default {
+		group1 {
+			pinmux = <UART1_TX_GPIO4>;
+			output-high;
+		};
+		group2 {
+			pinmux = <UART1_RX_GPIO5>;
+			bias-pull-up;
+		};
+	};
+};
+
+&uart1 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart1_default>;
+	pinctrl-names = "default";
 };
