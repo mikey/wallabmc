@@ -1,0 +1,62 @@
+/*
+ * SPDX-FileCopyrightText: © 2025-2026 Tenstorrent USA, Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * Seeed Studio XIAO ESP32-C6 port.
+ *
+ * The BMC console / shell is the SoC's built-in USB Serial/JTAG (the
+ * XIAO's USB-C connector); the board DTS already routes
+ * zephyr,console + zephyr,shell-uart there. That leaves UART0
+ * (GPIO16 TX / GPIO17 RX on the XIAO's D6/D7) free for the host
+ * serial bridge — its pinctrl is already declared by the board DTS,
+ * so this overlay only adds DMA channels to UART0.
+ *
+ *   D6 = GPIO16 = TX (out to host RX)
+ *   D7 = GPIO17 = RX (in from host TX)
+ *   D1 = GPIO1  = PWRBTN#   (open-drain, active-low)
+ *   D2 = GPIO2  = SYSRESET# (open-drain, active-low)
+ *   Common GND with the host board.
+ *
+ * /jtag node omitted -> CONFIG_JTAG auto-disabled via dt_path_enabled().
+ */
+
+#include <zephyr/dt-bindings/gpio/gpio.h>
+
+/ {
+	host_power {
+		compatible = "gpio-leds";
+
+		/*
+		 * Host power button and system reset. Open-drain + active-low:
+		 * the ESP32 only ever sinks current; the host's internal pull-up
+		 * sets the un-asserted level. host_pwrbtn is pulsed by power.c
+		 * when CONFIG_APP_HOST_POWER_PULSE=y. host_sysreset is pulsed by
+		 * the `reset` shell command (power_reset()) for ~1 s.
+		 */
+		host_pwrbtn: host_pwrbtn {
+			gpios = <&gpio0 1 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+		};
+		host_sysreset: host_sysreset {
+			gpios = <&gpio0 2 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+		};
+	};
+
+	aliases {
+		host-console-uart = &uart0;
+		power-gpio-1 = &host_pwrbtn;
+		reset-gpio-1 = &host_sysreset;
+		status-led = &yellow_led;
+	};
+};
+
+&dma {
+	status = "okay";
+};
+
+&uart0 {
+	/* GDMA channels for async TX / RX. Channels 2,3 are reserved by
+	 * i2s in the SoC DTS (i2s itself is disabled in this build).
+	 */
+	dmas = <&dma 0>, <&dma 1>;
+	dma-names = "tx", "rx";
+};

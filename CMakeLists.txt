@@ -8,7 +8,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(wallabmc)
 
 # Boards that use their SoC's native bootloader and skip mcuboot/sysbuild.
-set(NO_SYSBUILD_BOARDS "qemu_cortex_m3" "esp32c6_devkitc")
+set(NO_SYSBUILD_BOARDS "qemu_cortex_m3" "esp32c6_devkitc" "xiao_esp32c6")
 if(BOARD IN_LIST NO_SYSBUILD_BOARDS)
 	if(SYSBUILD)
 		message(FATAL_ERROR "${BOARD} must NOT be built with sysbuild (e.g., no --sysbuild argument)")
