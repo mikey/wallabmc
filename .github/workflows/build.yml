@@ -39,6 +39,8 @@ jobs:
             name: qemu_cortex_m3
           - board: esp32c6_devkitc/esp32c6/hpcore
             name: esp32c6_devkitc
+          - board: xiao_esp32c6/esp32c6/hpcore
+            name: xiao_esp32c6
 
     env:
       CMAKE_PREFIX_PATH: /opt/toolchains
