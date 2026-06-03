@@ -57,6 +57,7 @@
 		group1 {
 			pinmux = <UART1_TX_GPIO0>;
 			output-high;
+			drive-push-pull;
 		};
 		group2 {
 			pinmux = <UART1_RX_GPIO21>;
