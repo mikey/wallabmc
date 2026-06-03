@@ -6,13 +6,13 @@
  *
  * The BMC console / shell is the SoC's built-in USB Serial/JTAG (the
  * XIAO's USB-C connector); the board DTS already routes
- * zephyr,console + zephyr,shell-uart there. That leaves UART0
- * (GPIO16 TX / GPIO17 RX on the XIAO's D6/D7) free for the host
- * serial bridge — its pinctrl is already declared by the board DTS,
- * so this overlay only adds DMA channels to UART0.
+ * zephyr,console + zephyr,shell-uart there. The host serial bridge
+ * uses UART1 on D0 (GPIO0) / D3 (GPIO21) — both pads are otherwise
+ * unused on the XIAO connector and stay clear of the default I2C
+ * (D4/D5) and SPI (D8/D9/D10) bus pads.
  *
- *   D6 = GPIO16 = TX (out to host RX)
- *   D7 = GPIO17 = RX (in from host TX)
+ *   D0 = GPIO0  = UART1 TX (out to host RX)
+ *   D3 = GPIO21 = UART1 RX (in from host TX)
  *   D1 = GPIO1  = PWRBTN#   (open-drain, active-low)
  *   D2 = GPIO2  = SYSRESET# (open-drain, active-low)
  *   Common GND with the host board.
@@ -21,6 +21,9 @@
  */
 
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/pinctrl/esp-pinctrl-common.h>
+#include <zephyr/dt-bindings/pinctrl/esp32c6-pinctrl.h>
+#include <zephyr/dt-bindings/pinctrl/esp32c6-gpio-sigmap.h>
 
 / {
 	host_power {
@@ -42,10 +45,23 @@
 	};
 
 	aliases {
-		host-console-uart = &uart0;
+		host-console-uart = &uart1;
 		power-gpio-1 = &host_pwrbtn;
 		reset-gpio-1 = &host_sysreset;
 		status-led = &yellow_led;
+	};
+};
+
+&pinctrl {
+	uart1_default: uart1_default {
+		group1 {
+			pinmux = <UART1_TX_GPIO0>;
+			output-high;
+		};
+		group2 {
+			pinmux = <UART1_RX_GPIO21>;
+			bias-pull-up;
+		};
 	};
 };
 
@@ -53,7 +69,11 @@
 	status = "okay";
 };
 
-&uart0 {
+&uart1 {
+	status = "okay";
+	current-speed = <115200>;
+	pinctrl-0 = <&uart1_default>;
+	pinctrl-names = "default";
 	/* GDMA channels for async TX / RX. Channels 2,3 are reserved by
 	 * i2s in the SoC DTS (i2s itself is disabled in this build).
 	 */
