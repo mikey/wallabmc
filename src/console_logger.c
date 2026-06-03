@@ -20,7 +20,13 @@ LOG_MODULE_REGISTER(console_logger, LOG_LEVEL_INF);
 
 #include "synch.h"
 
-#define UART_RX_DELAY_US 50000
+/* Idle time before the UART RX driver flushes a partially-filled DMA buffer
+ * upstream as a UART_RX_RDY event. Short enough that interactive bursts
+ * (e.g. someone typing on the host serial) reach the bridge promptly,
+ * long enough that the driver gets to coalesce a few characters of a fast
+ * stream into one event instead of one event per byte.
+ */
+#define UART_RX_DELAY_US 5000
 
 #define UART_NODE DT_ALIAS(host_console_uart)
 static const struct device *uart_dev = DEVICE_DT_GET(UART_NODE);
