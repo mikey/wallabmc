@@ -51,7 +51,6 @@ static const struct gpio_dt_spec host_console_uart_muxsel_gpio = GPIO_DT_SPEC_GE
 
 struct console_log {
 	const struct device *uart;
-	uint64_t allocated;
 	uint64_t received;
 	int size;
 	struct k_spinlock rx_lock;
@@ -62,16 +61,37 @@ struct console_log {
 
 static struct console_log host_console_log;
 
-/* DMA'ed to/from by the UART, so must be __nocache */
+/*
+ * log_buffer holds the contiguous, received-byte-indexed ring. The UART
+ * DMA writes into a separate pair of scratch buffers (double-buffered)
+ * and uart_rx_ready copies each dispatch into log_buffer at the position
+ * given by log->received. This decouples the chunked DMA layout from the
+ * ring buffer, so that partial dispatches (idle-timeout flushes with
+ * fewer bytes than the chunk size) don't leave stale-zero gaps that the
+ * read path would later return to clients.
+ *
+ * The DMA-side buffers must be __nocache; the ring buffer doesn't have
+ * to be but it costs nothing to keep it there.
+ */
 static __nocache uint8_t log_buffer[CONFIG_APP_CONSOLE_LOG_SIZE];
+static __nocache uint8_t dma_scratch[2][UART_RX_BUF_SIZE];
 static __nocache uint8_t tx_buffer[UART_TX_BUF_SIZE];
+static unsigned int dma_scratch_next;
 
 static void uart_rx_ready(const struct device *dev, struct uart_event *evt, struct console_log *log)
 {
+	const uint8_t *src = evt->data.rx.buf + evt->data.rx.offset;
+	size_t src_len = evt->data.rx.len;
 	k_spinlock_key_t key;
+	size_t dst_off, first;
 
 	key = k_spin_lock(&log->rx_lock);
-	log->received += evt->data.rx.len;
+	dst_off = log->received % log->size;
+	first = MIN(src_len, log->size - dst_off);
+	memcpy(log->log_buffer + dst_off, src, first);
+	if (first < src_len)
+		memcpy(log->log_buffer, src + first, src_len - first);
+	log->received += src_len;
 	k_spin_unlock(&log->rx_lock, key);
 
 	k_event_post(&events, EVENT_CONSOLE_LOG_DATA);
@@ -79,34 +99,22 @@ static void uart_rx_ready(const struct device *dev, struct uart_event *evt, stru
 
 static void uart_rx_allocate(const struct device *dev, struct console_log *log)
 {
-	int off;
 	int ret;
-	k_spinlock_key_t key;
 
-	key = k_spin_lock(&log->rx_lock);
-	off = log->allocated % log->size;
-	log->allocated += UART_RX_BUF_SIZE;
-	k_spin_unlock(&log->rx_lock, key);
-
-	ret = uart_rx_buf_rsp(dev, log->log_buffer + off, UART_RX_BUF_SIZE);
+	ret = uart_rx_buf_rsp(dev, dma_scratch[dma_scratch_next], UART_RX_BUF_SIZE);
 	if (ret < 0)
 		LOG_ERR("Failed to supply buffer UART RX: %d", ret);
+	dma_scratch_next ^= 1;
 }
 
 static void uart_rx_start(const struct device *dev, struct console_log *log)
 {
-	int off;
 	int ret;
-	k_spinlock_key_t key;
 
-	key = k_spin_lock(&log->rx_lock);
-	off = log->allocated % log->size;
-	log->allocated += UART_RX_BUF_SIZE;
-	k_spin_unlock(&log->rx_lock, key);
-
-	ret = uart_rx_enable(dev, log->log_buffer + off, UART_RX_BUF_SIZE, UART_RX_DELAY_US);
+	ret = uart_rx_enable(dev, dma_scratch[dma_scratch_next], UART_RX_BUF_SIZE, UART_RX_DELAY_US);
 	if (ret < 0)
 		LOG_ERR("Failed to enable UART RX: %d", ret);
+	dma_scratch_next ^= 1;
 }
 
 static void uart_callback(const struct device *dev, struct uart_event *evt, void *user_data)
@@ -156,7 +164,7 @@ static ssize_t console_log_read(struct console_log *log, uint8_t *buf, size_t si
 	if (log->received < log->size) {
 		start = 0;
 	} else {
-		start = log->allocated - log->size;
+		start = log->received - log->size;
 	}
 
 	if (start > pos)
