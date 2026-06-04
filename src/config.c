@@ -224,6 +224,27 @@ int config_wifi_set(const char *ssid, const char *password)
 	return 0;
 }
 
+int config_wifi_clear(void)
+{
+	int rc;
+
+	config_data.wifi_ssid[0] = '\0';
+	config_data.wifi_password[0] = '\0';
+
+	rc = config_write_str(CFG_WIFI_SSID, config_data.wifi_ssid);
+	if (rc < 0) {
+		LOG_ERR("Configuration could not be saved (err=%d)", rc);
+		return rc;
+	}
+	rc = config_write_str(CFG_WIFI_PASSWORD, config_data.wifi_password);
+	if (rc < 0) {
+		LOG_ERR("Configuration could not be saved (err=%d)", rc);
+		return rc;
+	}
+
+	return 0;
+}
+
 #if defined(CONFIG_APP_HTTPS_PSK)
 /*
  * This is a placeholder to test PSK. If we want to support it

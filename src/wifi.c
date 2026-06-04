@@ -190,11 +190,55 @@ static int cmd_wifi_connect(const struct shell *sh, size_t argc, char **argv)
 	return 0;
 }
 
+static int cmd_wifi_clear(const struct shell *sh, size_t argc, char **argv)
+{
+	struct net_if *iface = net_if_get_first_wifi();
+	int rc;
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	rc = config_wifi_clear();
+	if (rc) {
+		shell_error(sh, "Could not clear Wi-Fi credentials (err=%d)", rc);
+		return rc;
+	}
+
+	if (iface) {
+		k_sem_reset(&wifi_disconnected_sem);
+		rc = net_mgmt(NET_REQUEST_WIFI_DISCONNECT, iface, NULL, 0);
+		if (rc == 0)
+			(void)k_sem_take(&wifi_disconnected_sem, K_MSEC(1000));
+	}
+
+	shell_info(sh, "Wi-Fi credentials cleared; not reconnecting");
+	return 0;
+}
+
+static int cmd_wifi_config(const struct shell *sh, size_t argc, char **argv)
+{
+	const char *ssid = config_wifi_ssid();
+	const char *password = config_wifi_password();
+
+	ARG_UNUSED(argc);
+	ARG_UNUSED(argv);
+
+	if (ssid[0] == '\0') {
+		shell_print(sh, "Wi-Fi: no credentials stored (use `wifi connect <ssid> <password>`)");
+	} else {
+		shell_print(sh, "Wi-Fi SSID:     %s", ssid);
+		shell_print(sh, "Wi-Fi password: %s", password);
+	}
+	return 0;
+}
+
 SHELL_STATIC_SUBCMD_SET_CREATE(sub_wifi_cmds,
 	SHELL_CMD_ARG(connect, NULL,
 		      "Connect to a Wi-Fi network and persist the credentials.\n"
 		      "Usage: wifi connect <ssid> <password>",
 		      cmd_wifi_connect, 3, 0),
+	SHELL_CMD(clear,  NULL, "Clear the stored Wi-Fi credentials and disconnect.", cmd_wifi_clear),
+	SHELL_CMD(config, NULL, "Show the stored Wi-Fi credentials.",                  cmd_wifi_config),
 	SHELL_SUBCMD_SET_END
 );
 
