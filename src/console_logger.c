@@ -9,24 +9,12 @@
 LOG_MODULE_REGISTER(console_logger, LOG_LEVEL_INF);
 
 #include <zephyr/spinlock.h>
-#include <zephyr/posix/fcntl.h>
 #include <zephyr/drivers/uart.h>
 #include <zephyr/drivers/gpio.h>
-#include <zephyr/net/socket.h>
 #include <errno.h>
-#include <unistd.h>
-#include <sys/socket.h>
 #include <string.h>
 
 #include "synch.h"
-
-/* Idle time before the UART RX driver flushes a partially-filled DMA buffer
- * upstream as a UART_RX_RDY event. Short enough that interactive bursts
- * (e.g. someone typing on the host serial) reach the bridge promptly,
- * long enough that the driver gets to coalesce a few characters of a fast
- * stream into one event instead of one event per byte.
- */
-#define UART_RX_DELAY_US 5000
 
 #define UART_NODE DT_ALIAS(host_console_uart)
 static const struct device *uart_dev = DEVICE_DT_GET(UART_NODE);
@@ -40,115 +28,70 @@ static const struct gpio_dt_spec host_console_uart_muxsel_gpio = GPIO_DT_SPEC_GE
 #endif
 
 /*
- * Chunk size of the circular console log that we give to UART RX DMA. This does not
- * consume any memory (it's just a chunk of the console log buffer region), but it
- * does make the oldest part of the log unavailable so should not be a big fraction of
- * the console log size. Two chunks will be in-flight at any time due to the pipelined
- * buffer allocation in the uart code, so this uses up to 1/8th of the log space.
+ * Max bytes to drain from the UART RX FIFO per IRQ. Larger keeps each
+ * IRQ self-contained at higher line rates; smaller bounds the time
+ * spent in the handler. 64 is comfortable at 115200 (~5.6 ms of bytes).
  */
-#define UART_RX_BUF_SIZE (CONFIG_APP_CONSOLE_LOG_SIZE / 16)
-
-/*
- * TX buf is the size of the DMA buffer we can give to the UART.
- * Probably does not have to be this large, most interactive input
- * will be a handful of characters.
- */
-#define UART_TX_BUF_SIZE 32
+#define UART_RX_DRAIN_CHUNK 64
 
 struct console_log {
 	const struct device *uart;
 	uint64_t received;
 	int size;
 	struct k_spinlock rx_lock;
-	struct k_sem tx_sem;
+
+	/* TX is serialized by tx_mutex; tx_done is given by the IRQ when
+	 * the pending buffer has been fully pushed to the FIFO.
+	 */
+	struct k_mutex tx_mutex;
+	struct k_sem tx_done;
+	const uint8_t *tx_buf;
+	size_t tx_len;
+	size_t tx_pos;
+
 	uint8_t *log_buffer;
-	uint8_t *tx_buffer;
 };
 
 static struct console_log host_console_log;
 
-/*
- * log_buffer holds the contiguous, received-byte-indexed ring. The UART
- * DMA writes into a separate pair of scratch buffers (double-buffered)
- * and uart_rx_ready copies each dispatch into log_buffer at the position
- * given by log->received. This decouples the chunked DMA layout from the
- * ring buffer, so that partial dispatches (idle-timeout flushes with
- * fewer bytes than the chunk size) don't leave stale-zero gaps that the
- * read path would later return to clients.
- *
- * The DMA-side buffers must be __nocache; the ring buffer doesn't have
- * to be but it costs nothing to keep it there.
- */
-static __nocache uint8_t log_buffer[CONFIG_APP_CONSOLE_LOG_SIZE];
-static __nocache uint8_t dma_scratch[2][UART_RX_BUF_SIZE];
-static __nocache uint8_t tx_buffer[UART_TX_BUF_SIZE];
-static unsigned int dma_scratch_next;
+static uint8_t log_buffer[CONFIG_APP_CONSOLE_LOG_SIZE];
 
-static void uart_rx_ready(const struct device *dev, struct uart_event *evt, struct console_log *log)
-{
-	const uint8_t *src = evt->data.rx.buf + evt->data.rx.offset;
-	size_t src_len = evt->data.rx.len;
-	k_spinlock_key_t key;
-	size_t dst_off, first;
-
-	key = k_spin_lock(&log->rx_lock);
-	dst_off = log->received % log->size;
-	first = MIN(src_len, log->size - dst_off);
-	memcpy(log->log_buffer + dst_off, src, first);
-	if (first < src_len)
-		memcpy(log->log_buffer, src + first, src_len - first);
-	log->received += src_len;
-	k_spin_unlock(&log->rx_lock, key);
-
-	k_event_post(&events, EVENT_CONSOLE_LOG_DATA);
-}
-
-static void uart_rx_allocate(const struct device *dev, struct console_log *log)
-{
-	int ret;
-
-	ret = uart_rx_buf_rsp(dev, dma_scratch[dma_scratch_next], UART_RX_BUF_SIZE);
-	if (ret < 0)
-		LOG_ERR("Failed to supply buffer UART RX: %d", ret);
-	dma_scratch_next ^= 1;
-}
-
-static void uart_rx_start(const struct device *dev, struct console_log *log)
-{
-	int ret;
-
-	ret = uart_rx_enable(dev, dma_scratch[dma_scratch_next], UART_RX_BUF_SIZE, UART_RX_DELAY_US);
-	if (ret < 0)
-		LOG_ERR("Failed to enable UART RX: %d", ret);
-	dma_scratch_next ^= 1;
-}
-
-static void uart_callback(const struct device *dev, struct uart_event *evt, void *user_data)
+static void uart_isr_cb(const struct device *dev, void *user_data)
 {
 	struct console_log *log = user_data;
 
-	switch (evt->type) {
-	case UART_RX_RDY:
-		uart_rx_ready(dev, evt, log);
-		break;
+	while (uart_irq_update(dev) > 0 && uart_irq_is_pending(dev)) {
+		if (uart_irq_rx_ready(dev)) {
+			uint8_t tmp[UART_RX_DRAIN_CHUNK];
+			int n = uart_fifo_read(dev, tmp, sizeof(tmp));
 
-	case UART_RX_DISABLED:
-		uart_rx_start(dev, log);
-		break;
+			if (n > 0) {
+				k_spinlock_key_t key = k_spin_lock(&log->rx_lock);
+				size_t off = log->received % log->size;
+				size_t first = MIN((size_t)n, (size_t)log->size - off);
 
-	case UART_RX_BUF_REQUEST:
-		uart_rx_allocate(dev, log);
-		break;
+				memcpy(log->log_buffer + off, tmp, first);
+				if (first < (size_t)n)
+					memcpy(log->log_buffer, tmp + first, (size_t)n - first);
+				log->received += (size_t)n;
+				k_spin_unlock(&log->rx_lock, key);
 
-	case UART_RX_STOPPED:
-		break;
+				k_event_post(&events, EVENT_CONSOLE_LOG_DATA);
+			}
+		}
 
-	case UART_TX_DONE:
-		k_sem_give(&log->tx_sem);
-		break;
-
-	default:
-		break;
+		if (uart_irq_tx_ready(dev)) {
+			if (log->tx_pos < log->tx_len) {
+				int n = uart_fifo_fill(dev, log->tx_buf + log->tx_pos,
+						       log->tx_len - log->tx_pos);
+				if (n > 0)
+					log->tx_pos += n;
+			}
+			if (log->tx_pos >= log->tx_len) {
+				uart_irq_tx_disable(dev);
+				k_sem_give(&log->tx_done);
+			}
+		}
 	}
 }
 
@@ -197,26 +140,22 @@ out:
 
 static ssize_t console_log_write(struct console_log *log, const uint8_t *buf, size_t size)
 {
-	size_t copied = 0;
+	k_mutex_lock(&log->tx_mutex, K_FOREVER);
 
-	while (copied < size) {
-		size_t len = MIN(size - copied, UART_TX_BUF_SIZE);
-		int ret;
+	log->tx_buf = buf;
+	log->tx_len = size;
+	log->tx_pos = 0;
+	k_sem_reset(&log->tx_done);
 
-		k_sem_take(&log->tx_sem, K_FOREVER);
-		memcpy(log->tx_buffer, buf + copied, len);
+	uart_irq_tx_enable(log->uart);
+	k_sem_take(&log->tx_done, K_FOREVER);
 
-		ret = uart_tx(log->uart, log->tx_buffer, len, SYS_FOREVER_US);
-		if (ret < 0) {
-			LOG_WRN("UART TX error: %d", ret);
-			k_sem_give(&log->tx_sem);
-			return copied ? copied : ret;
-		}
+	log->tx_buf = NULL;
+	log->tx_len = 0;
+	log->tx_pos = 0;
 
-		copied += len;
-	}
-
-	return copied;
+	k_mutex_unlock(&log->tx_mutex);
+	return size;
 }
 
 ssize_t host_console_read(uint8_t *buf, size_t size, uint64_t *ppos)
@@ -267,9 +206,9 @@ int console_logger_init(void)
 	memset(log, 0, sizeof(struct console_log));
 	log->uart = uart_dev;
 	log->size = sizeof(log_buffer);
-	k_sem_init(&log->tx_sem, 1, 1);
+	k_mutex_init(&log->tx_mutex);
+	k_sem_init(&log->tx_done, 0, 1);
 	log->log_buffer = log_buffer;
-	log->tx_buffer = tx_buffer;
 
 #if DT_NODE_EXISTS(UARTMUXSEL_NODE)
 	/* Initialize host_console_uart_muxsel GPIO */
@@ -290,22 +229,19 @@ int console_logger_init(void)
 
 	ret = uart_configure(uart_dev, &uart_cfg);
 	if (ret < 0) {
-		LOG_ERR("Configuration is not supported by device or driver,"
-			" check the UART settings configuration");
+		LOG_ERR("UART configure failed: %d", ret);
 		return -1;
 	}
 
-	/* Set up UART callback for async RX */
-	ret = uart_callback_set(uart_dev, uart_callback, log);
+	ret = uart_irq_callback_user_data_set(uart_dev, uart_isr_cb, log);
 	if (ret < 0) {
-		LOG_ERR("Failed to set UART callback: %d", ret);
+		LOG_ERR("Failed to set UART IRQ callback: %d", ret);
 		return ret;
 	}
 
-	/* Enable UART RX to start receiving data */
-	uart_rx_start(uart_dev, log);
+	uart_irq_rx_enable(uart_dev);
 
-	LOG_INF("UART callback configured for console logger");
+	LOG_INF("UART IRQ configured for console logger");
 
 	return 0;
 }
