@@ -31,16 +31,20 @@
 
 		/*
 		 * Host power button and system reset. Open-drain + active-low:
-		 * the ESP32 only ever sinks current; the host's internal pull-up
-		 * sets the un-asserted level. host_pwrbtn is pulsed by power.c
-		 * when CONFIG_APP_HOST_POWER_PULSE=y. host_sysreset is pulsed by
-		 * the `reset` shell command (power_reset()) for ~1 s.
+		 * the ESP32 only ever sinks current; the un-asserted level is
+		 * set by the host (e.g. K3 internal pull-up) or, with no host
+		 * connected, by the ESP32 internal pull-up that GPIO_PULL_UP
+		 * enables here -- so the line idles high either way, including
+		 * for bench probing with an oscilloscope. host_pwrbtn is pulsed
+		 * by power.c when CONFIG_APP_HOST_POWER_PULSE=y. host_sysreset
+		 * is pulsed by `reset` / `power force-restart` (power_reset())
+		 * for ~1 s.
 		 */
 		host_pwrbtn: host_pwrbtn {
-			gpios = <&gpio0 1 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+			gpios = <&gpio0 1 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;
 		};
 		host_sysreset: host_sysreset {
-			gpios = <&gpio0 2 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN)>;
+			gpios = <&gpio0 2 (GPIO_ACTIVE_LOW | GPIO_OPEN_DRAIN | GPIO_PULL_UP)>;
 		};
 	};
 
