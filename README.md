@@ -104,9 +104,11 @@ reset             # 1 s press on GPIO7
 
 Same SoC as the DevKitC port above, on Seeed Studio's 21×17.5 mm XIAO
 form factor with a USB-C connector. The BMC console runs over the SoC's
-built-in USB Serial/JTAG (the XIAO's USB-C port), which frees UART0 for
-the host serial bridge. Only four GPIOs on the XIAO connector are
-needed for host control; the rest of the pads are free for other uses.
+built-in USB Serial/JTAG (the XIAO's USB-C port), so a separate UART
+(UART1) is free for the host serial bridge. Only four GPIOs on the
+XIAO connector are needed for host control; the host UART pads stay
+clear of the default I2C bus (D4/D5) and SPI bus (D8/D9/D10) so those
+remain free for other uses.
 
 #### Wiring
 
@@ -114,8 +116,8 @@ Five wires between the XIAO ESP32-C6 and the host board:
 
 | XIAO pin | GPIO | Direction | Host signal | Notes |
 | --- | --- | --- | --- | --- |
-| D6 | GPIO16 | out | host UART RX | UART0 TX — host serial console (115200 8N1) |
-| D7 | GPIO17 | in | host UART TX | UART0 RX — host serial console |
+| D0 | GPIO0 | out | host UART RX | UART1 TX — host serial console (115200 8N1) |
+| D3 | GPIO21 | in | host UART TX | UART1 RX — host serial console |
 | D1 | GPIO1 | out (open-drain) | PWRBTN# input | Active-low momentary press |
 | D2 | GPIO2 | out (open-drain) | SYSRESET# input | Active-low momentary press |
 | GND | — | — | GND | Common reference, required |
@@ -123,7 +125,7 @@ Five wires between the XIAO ESP32-C6 and the host board:
 The same voltage caveats from the DevKitC port apply: ESP32-C6 GPIOs are
 not 5 V tolerant, so use a level-shifting MOSFET on PWRBTN# / SYSRESET#
 if the host pulls those lines above 3.3 V un-asserted, and level-shift
-the host's UART TX into D7 (GPIO17) if it runs above 3.3 V.
+the host's UART TX into D3 (GPIO21) if it runs above 3.3 V.
 
 #### Build and flash
 
