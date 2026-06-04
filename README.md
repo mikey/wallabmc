@@ -70,8 +70,8 @@ GPIO16/17 stay reserved for the BMC's own UART0 console (the
 #### Build and flash
 
 This board uses Espressif's built-in Simple Boot rather than MCUboot,
-so the build skips ``--sysbuild``. Wi-Fi credentials and (optionally) a
-fixed admin password are supplied at build time via ``-D`` overrides:
+so the build skips ``--sysbuild``. An optional fixed admin password
+is supplied at build time via a ``-D`` override:
 
 ```
 # One-time: fetch the Espressif Wi-Fi/PHY binary blobs.
@@ -79,10 +79,20 @@ west blobs fetch hal_espressif
 
 cd zephyr
 west build -b esp32c6_devkitc/esp32c6/hpcore ../wallabmc --pristine \
-    -- -DCONFIG_WIFI_CREDENTIALS_STATIC_SSID='"your-ssid"' \
-       -DCONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD='"your-password"' \
-       -DCONFIG_DEFAULT_ADMIN_PASSWORD='"admin"'
+    -- -DCONFIG_DEFAULT_ADMIN_PASSWORD='"admin"'
 west flash
+```
+
+Wi-Fi credentials are normally set at runtime over the BMC console
+with ``wifi connect <ssid> <password>``; they persist in NVS, so a
+``bmc reboot`` brings the BMC back on the same network. To bake an
+SSID into the image (for first-boot bring-up without console access),
+add:
+
+```
+    -DCONFIG_WIFI_CREDENTIALS_STATIC=y \
+    -DCONFIG_WIFI_CREDENTIALS_STATIC_SSID='"your-ssid"' \
+    -DCONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD='"your-password"' \
 ```
 
 On boot the BMC associates to Wi-Fi, picks up a DHCPv4 lease, and logs
@@ -138,11 +148,21 @@ west blobs fetch hal_espressif
 
 cd zephyr
 west build -b xiao_esp32c6/esp32c6/hpcore ../wallabmc --pristine \
-    -- -DCONFIG_WIFI_CREDENTIALS_STATIC_SSID='"your-ssid"' \
-       -DCONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD='"your-password"' \
-       -DCONFIG_DEFAULT_ADMIN_PASSWORD='"admin"'
+    -- -DCONFIG_DEFAULT_ADMIN_PASSWORD='"admin"'
 west flash
 ```
+
+The first time you boot a freshly flashed image with no baked-in
+SSID, set the Wi-Fi from the BMC console (USB-CDC over the XIAO's
+USB-C port):
+
+```
+wifi connect your-ssid your-password
+```
+
+The credentials are persisted in NVS and reused on every subsequent
+boot. To bake an SSID into the image instead, see the DevKitC build
+notes above.
 
 Host control from the shell is the same as the DevKitC port:
 

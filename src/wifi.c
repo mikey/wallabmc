@@ -121,15 +121,29 @@ int wifi_connect_init(void)
 	if (ssid[0] != '\0') {
 		LOG_INF("Connecting to stored Wi-Fi SSID: %s", ssid);
 		rc = wifi_connect_with(iface, ssid, config_wifi_password());
-	} else {
-		rc = net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, NULL, 0);
-	}
-	if (rc) {
-		LOG_ERR("Wi-Fi connect request failed (rc=%d)", rc);
-		return rc;
+		if (rc) {
+			LOG_ERR("Wi-Fi connect request failed (rc=%d)", rc);
+			return rc;
+		}
+		LOG_INF("Wi-Fi connect requested; waiting for association...");
+		return 0;
 	}
 
+#if defined(CONFIG_WIFI_CREDENTIALS_CONNECT_STORED)
+	/*
+	 * NVS has no SSID; fall back to whatever is in the wifi_credentials
+	 * store (typically the compile-time CONFIG_WIFI_CREDENTIALS_STATIC
+	 * entry baked into the image).
+	 */
+	rc = net_mgmt(NET_REQUEST_WIFI_CONNECT_STORED, iface, NULL, 0);
+	if (rc) {
+		LOG_ERR("Wi-Fi connect-stored request failed (rc=%d)", rc);
+		return rc;
+	}
 	LOG_INF("Wi-Fi connect requested; waiting for association...");
+#else
+	LOG_WRN("No Wi-Fi credentials configured -- use `wifi connect <ssid> <password>` to set them");
+#endif
 	return 0;
 }
 
