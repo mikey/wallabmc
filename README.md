@@ -27,8 +27,7 @@ WallaBMC currently supports the following hardware platforms:
 | --- | --- | --- |
 | **SiFive HiFive Premier P550 MCU** | hifive_premier_p550_mcu | RISC-V based platform |
 | **STM32 Nucleo F767ZI** | nucleo_f767zi | ARM Cortex-M7 development board (standalone, no host CPU) |
-| **Espressif ESP32-C6 DevKitC** | esp32c6_devkitc/esp32c6/hpcore | RISC-V, Wi-Fi 6, wired to a SpacemiT K3 SoM260 host (see [below](#esp32-c6-devkitc--spacemit-k3-som260)) |
-| **Seeed Studio XIAO ESP32-C6** | xiao_esp32c6/esp32c6/hpcore | Same SoC as above on a 21×17.5 mm board with USB-C; BMC console over USB Serial/JTAG (see [below](#seeed-xiao-esp32-c6)) |
+| **Seeed Studio XIAO ESP32-C6** | xiao_esp32c6/esp32c6/hpcore | RISC-V, Wi-Fi 6, on a 21×17.5 mm board with USB-C; BMC console over USB Serial/JTAG (see [below](#seeed-xiao-esp32-c6)) |
 | **qemu** | qemu_cortex_m3 | see [run_qemu_ci.py](scripts/run_qemu_ci.py) |
 
 ### Screenshot
@@ -37,83 +36,10 @@ The main page of the web interface is shown below, click to enlarge.
 
 [![Web UI screenshot](img/web-ui-thumbnail.png)](img/web-ui.png)
 
-### ESP32-C6 DevKitC + SpacemiT K3 SoM260
-
-The ESP32-C6 port wires the DevKitC's GPIO header to a SpacemiT K3
-SoM260 host so the K3 can be reset, powered, and console-monitored
-remotely.
-
-#### Wiring
-
-Five wires between the ESP32-C6 DevKitC and the K3 SoM260:
-
-| ESP32-C6 pin | Direction | K3 SoM260 signal | Notes |
-| --- | --- | --- | --- |
-| GPIO4 | out | host UART RX | UART1 TX — host serial console (115200 8N1) |
-| GPIO5 | in | host UART TX | UART1 RX — host serial console |
-| GPIO6 | out (open-drain) | PWRBTN# input | Active-low momentary press |
-| GPIO7 | out (open-drain) | SYSRESET# input | Active-low momentary press |
-| GND | — | GND | Common reference, required |
-
-GPIO16/17 stay reserved for the BMC's own UART0 console (the
-``cu.usbserial-…`` device when the DevKitC is plugged into a host PC).
-
-> **Voltage warning.** The ESP32-C6 GPIOs are **not** 5 V tolerant.
-> The PWRBTN# and SYSRESET# pins are driven open-drain, so they only
-> sink — the K3's internal pull-up sets the un-asserted level, and the
-> ESP32 never sources voltage onto these pins. If the K3 holds either
-> line above 3.3 V when un-asserted, add a small N-MOSFET (gate = ESP32
-> GPIO, drain = K3 pin, source = GND) between them. The UART1 RX line
-> (GPIO5) does see the K3's TX voltage directly; if the K3 UART runs
-> above 3.3 V, level-shift it.
-
-#### Build and flash
-
-This board uses Espressif's built-in Simple Boot rather than MCUboot,
-so the build skips ``--sysbuild``. An optional fixed admin password
-is supplied at build time via a ``-D`` override:
-
-```
-# One-time: fetch the Espressif Wi-Fi/PHY binary blobs.
-west blobs fetch hal_espressif
-
-cd zephyr
-west build -b esp32c6_devkitc/esp32c6/hpcore ../wallabmc --pristine \
-    -- -DCONFIG_DEFAULT_ADMIN_PASSWORD='"admin"'
-west flash
-```
-
-Wi-Fi credentials are normally set at runtime over the BMC console
-with ``wifi connect <ssid> <password>``; they persist in NVS, so a
-``bmc reboot`` brings the BMC back on the same network. To bake an
-SSID into the image (for first-boot bring-up without console access),
-add:
-
-```
-    -DCONFIG_WIFI_CREDENTIALS_STATIC=y \
-    -DCONFIG_WIFI_CREDENTIALS_STATIC_SSID='"your-ssid"' \
-    -DCONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD='"your-password"' \
-```
-
-On boot the BMC associates to Wi-Fi, picks up a DHCPv4 lease, and logs
-the address on the BMC console. Browse to ``http://<that-ip>/`` for
-the web UI; the BMC shell is available there, on the BMC UART, or
-(once the K3 is up) the host UART console is reachable via the web
-UI's host-console terminal and TCP port 22.
-
-#### Host control from the shell
-
-```
-power on          # 200 ms press on GPIO6 (if BMC believes host is off)
-power off         # 200 ms press on GPIO6 (if BMC believes host is on)
-power force-off   # 6 s press on GPIO6
-reset             # 1 s press on GPIO7
-```
-
 ### Seeed XIAO ESP32-C6
 
-Same SoC as the DevKitC port above, on Seeed Studio's 21×17.5 mm XIAO
-form factor with a USB-C connector. The BMC console runs over the SoC's
+The ESP32-C6 (RISC-V, Wi-Fi 6) on Seeed Studio's 21×17.5 mm XIAO form
+factor with a USB-C connector. The BMC console runs over the SoC's
 built-in USB Serial/JTAG (the XIAO's USB-C port), so a separate UART
 (UART1) is free for the host serial bridge. Only three GPIOs on the
 XIAO connector are needed for host control; the host UART pads stay
@@ -131,16 +57,20 @@ Four wires between the XIAO ESP32-C6 and the host board:
 | D2 | GPIO2 | out (open-drain) | SYSRESET# input | Active-low, 1 s low pulse on `reset` / `power force-restart` |
 | GND | — | — | GND | Common reference, required |
 
-The same voltage caveats from the DevKitC port apply: ESP32-C6 GPIOs are
-not 5 V tolerant, so use a level-shifting MOSFET on SYSRESET# if the
-host pulls that line above 3.3 V un-asserted, and level-shift the
-host's UART TX into D3 (GPIO21) if it runs above 3.3 V.
+> **Voltage warning.** ESP32-C6 GPIOs are **not** 5 V tolerant. The
+> SYSRESET# pin is driven open-drain, so it only sinks — the host's
+> internal pull-up sets the un-asserted level. If the host holds that
+> line above 3.3 V when un-asserted, add a small N-MOSFET (gate = ESP32
+> GPIO, drain = host pin, source = GND) between them. The UART1 RX
+> line (D3 / GPIO21) sees the host's TX voltage directly; if the host
+> UART runs above 3.3 V, level-shift it.
 
 #### Build and flash
 
-Same Espressif Simple Boot / no-sysbuild flow as the DevKitC. Plug the
-XIAO into your build host over USB-C — the same USB cable provides
-power, flashes the firmware, and carries the BMC console:
+The XIAO uses Espressif's built-in Simple Boot rather than MCUboot,
+so the build skips ``--sysbuild``. Plug the XIAO into your build host
+over USB-C — the same USB cable provides power, flashes the firmware,
+and carries the BMC console:
 
 ```
 # One-time: fetch the Espressif Wi-Fi/PHY binary blobs.
@@ -161,16 +91,30 @@ wifi connect your-ssid your-password
 ```
 
 The credentials are persisted in NVS and reused on every subsequent
-boot. To bake an SSID into the image instead, see the DevKitC build
-notes above.
-
-Host control from the shell is the same as the DevKitC port:
+boot. To bake an SSID into the image instead (for first-boot bring-up
+without console access), add to the cmake line:
 
 ```
-power on          # 200 ms press on GPIO1 (if BMC believes host is off)
-power off         # 200 ms press on GPIO1 (if BMC believes host is on)
-power force-off   # 6 s press on GPIO1
-reset             # 1 s press on GPIO2
+    -DCONFIG_WIFI_CREDENTIALS=y \
+    -DCONFIG_WIFI_CREDENTIALS_STATIC=y \
+    -DCONFIG_WIFI_CREDENTIALS_STATIC_SSID='"your-ssid"' \
+    -DCONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD='"your-password"' \
+```
+
+On boot the BMC associates to Wi-Fi, picks up a DHCPv4 lease, and
+logs the address on the BMC console. Browse to ``http://<that-ip>/``
+for the web UI; the BMC shell is available there, on the BMC USB-CDC
+console, or (once the host is up) the host UART console is reachable
+via the web UI's host-console terminal and TCP port 22.
+
+#### Host control from the shell
+
+```
+power on              # 200 ms press on GPIO1 (if BMC believes host is off)
+power off             # 200 ms press on GPIO1 (if BMC believes host is on)
+power force-off       # 6 s press on GPIO1
+power force-restart   # 1 s low pulse on GPIO2 (SYSRESET#)
+reset                 # alias for power force-restart
 ```
 
 ## Using
