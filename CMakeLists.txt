@@ -8,7 +8,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(wallabmc)
 
 # Boards that use their SoC's native bootloader and skip mcuboot/sysbuild.
-set(NO_SYSBUILD_BOARDS "qemu_cortex_m3" "xiao_esp32c6")
+set(NO_SYSBUILD_BOARDS "qemu_cortex_m3")
 if(BOARD IN_LIST NO_SYSBUILD_BOARDS)
 	if(SYSBUILD)
 		message(FATAL_ERROR "${BOARD} must NOT be built with sysbuild (e.g., no --sysbuild argument)")
@@ -71,6 +71,10 @@ target_sources_ifdef(CONFIG_APP_NTP app PRIVATE
 
 target_sources_ifdef(CONFIG_APP_WIFI app PRIVATE
 	src/wifi.c
+)
+
+target_sources_ifdef(CONFIG_APP_OTA app PRIVATE
+	src/ota.c
 )
 
 target_sources_ifdef(CONFIG_HTTP_SERVER app PRIVATE

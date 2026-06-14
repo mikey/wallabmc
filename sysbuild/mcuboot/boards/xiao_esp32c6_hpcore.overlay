@@ -1,0 +1,18 @@
+/*
+ * SPDX-FileCopyrightText: © 2025-2026 Tenstorrent USA, Inc.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * MCUboot overlay for the xiao_esp32c6 build: point the bootloader at
+ * the boot_partition (0x0) instead of the slot0_partition that the
+ * application image uses.
+ *
+ * Without this MCUboot is built with CONFIG_FLASH_LOAD_OFFSET=0x20000
+ * (the wallabmc app slot) and the esp32 west runner ends up writing
+ * the bootloader on top of the application.
+ */
+
+/ {
+    chosen {
+        zephyr,code-partition = &boot_partition;
+    };
+};

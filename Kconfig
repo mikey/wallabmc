@@ -400,6 +400,33 @@ config APP_WIFI
 	  -DCONFIG_WIFI_CREDENTIALS_STATIC_SSID='"..."'
 	  -DCONFIG_WIFI_CREDENTIALS_STATIC_PASSWORD='"..."'
 	  on the cmake line.
+config APP_OTA
+	bool "OTA firmware update over the network"
+	depends on BOOTLOADER_MCUBOOT
+	select FLASH
+	select FLASH_MAP
+	select STREAM_FLASH
+	select STREAM_FLASH_ERASE
+	select IMG_MANAGER
+	select IMG_ERASE_PROGRESSIVELY
+	select MCUBOOT_BOOTUTIL_LIB
+	select HTTP_CLIENT
+	select HTTP_PARSER_URL
+	select REBOOT
+	help
+	  Adds the `bmc ota` shell command which downloads a signed
+	  Zephyr image over HTTP, writes it into the inactive MCUboot
+	  slot, marks it for swap, and reboots. Requires MCUboot as the
+	  bootloader so the swap can be performed safely.
+
+config APP_OTA_HTTP_BUF_SIZE
+	int "OTA HTTP receive buffer size"
+	default 1024
+	depends on APP_OTA
+	help
+	  Working buffer used by the HTTP client to parse headers and
+	  stream the body. Must fit the longest single header line; the
+	  body is streamed straight through to flash via flash_img.
 
 config JTAG
 	bool "JTAG support"

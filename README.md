@@ -67,20 +67,27 @@ Four wires between the XIAO ESP32-C6 and the host board:
 
 #### Build and flash
 
-The XIAO uses Espressif's built-in Simple Boot rather than MCUboot,
-so the build skips ``--sysbuild``. Plug the XIAO into your build host
-over USB-C — the same USB cable provides power, flashes the firmware,
-and carries the BMC console:
+The XIAO build pairs MCUboot (overwrite-only mode) with the wallabmc
+application image so the BMC can update itself over the network via the
+`ota` shell command. Plug the XIAO into your build host over USB-C —
+the same USB cable provides power, flashes the firmware, and carries
+the BMC console:
 
 ```
 # One-time: fetch the Espressif Wi-Fi/PHY binary blobs.
 west blobs fetch hal_espressif
 
 cd zephyr
-west build -b xiao_esp32c6/esp32c6/hpcore ../wallabmc --pristine \
-    -- -DCONFIG_DEFAULT_ADMIN_PASSWORD='"admin"'
-west flash
+west build --sysbuild -b xiao_esp32c6/esp32c6/hpcore ../wallabmc \
+    --pristine -- -DCONFIG_DEFAULT_ADMIN_PASSWORD='"admin"'
+west flash --domain mcuboot
+west flash --domain wallabmc
 ```
+
+`west flash` without ``--domain`` only writes the application slot, so
+the first install of a new XIAO needs both ``--domain mcuboot`` and
+``--domain wallabmc``. Subsequent application-only iterations can use
+``west flash --domain wallabmc`` alone.
 
 The first time you boot a freshly flashed image with no baked-in
 SSID, set the Wi-Fi from the BMC console (USB-CDC over the XIAO's
@@ -116,6 +123,31 @@ power force-off       # 6 s press on GPIO1
 power force-restart   # 1 s low pulse on GPIO2 (SYSRESET#)
 reset                 # alias for power force-restart
 ```
+
+#### OTA firmware update
+
+The XIAO build enables ``CONFIG_APP_OTA``. Build a new image with
+``--sysbuild`` (so MCUboot signs ``build/wallabmc/zephyr/zephyr.signed.bin``),
+serve it over HTTP from any reachable IPv4 address on the same network,
+and tell the BMC to pull it in:
+
+```
+# On the build host:
+python3 -m http.server 8765 --bind 0.0.0.0
+
+# On the BMC shell (USB-CDC console or web terminal):
+ota url http://<build-host-ipv4>:8765/zephyr.signed.bin
+```
+
+The BMC streams the body straight into the MCUboot upgrade slot, asks
+MCUboot to apply it, and reboots. On the next boot MCUboot copies the
+staged image over the application slot (overwrite-only — no scratch
+slot needed, no automatic rollback). `ota status` reports the current
+build tag and pending swap state.
+
+The URL host must be a dotted-quad IPv4 (no DNS); the build's network
+stack is configured without the resolver subsystem because enabling it
+destabilises the websocket consoles.
 
 ## Using
 
